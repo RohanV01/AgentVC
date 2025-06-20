@@ -24,11 +24,14 @@ import {
   Building2,
   Briefcase,
   Brain,
-  FolderOpen
+  FolderOpen,
+  Eye,
+  Search
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
+import PitchDeckViewer from '../components/PitchDeckViewer';
 
 const Dashboard: React.FC = () => {
   const { user, userProfile, logout, loading } = useAuth();
@@ -39,6 +42,7 @@ const Dashboard: React.FC = () => {
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState('');
   const [loadingDecks, setLoadingDecks] = useState(true);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
 
   // Redirect to signin if not authenticated
   useEffect(() => {
@@ -144,11 +148,11 @@ const Dashboard: React.FC = () => {
     try {
       setUploading(true);
       const result = await apiService.uploadPitchDeck(file);
-      setUploadSuccess(`Successfully uploaded: ${result.fileName}`);
+      setUploadSuccess(`Successfully uploaded and analyzed: ${result.fileName}`);
       await loadPitchDecks(); // Refresh the list
       
-      // Clear success message after 3 seconds
-      setTimeout(() => setUploadSuccess(''), 3000);
+      // Clear success message after 5 seconds
+      setTimeout(() => setUploadSuccess(''), 5000);
     } catch (error: any) {
       console.error('Upload error:', error);
       setUploadError(error.message || 'Upload failed');
@@ -184,6 +188,10 @@ const Dashboard: React.FC = () => {
       console.error('Download error:', error);
       alert(`Failed to download deck: ${error.message}`);
     }
+  };
+
+  const handleViewDeck = (deckId: string) => {
+    setSelectedDeckId(deckId);
   };
 
   // Mock session data
@@ -366,10 +374,10 @@ const Dashboard: React.FC = () => {
                       transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                     />
                     <h4 className="text-xl font-bold text-white mb-2">
-                      Uploading...
+                      Uploading & Analyzing...
                     </h4>
                     <p className="text-slate-400">
-                      Processing your pitch deck
+                      Extracting text and analyzing your pitch deck
                     </p>
                   </motion.div>
                 ) : (
@@ -384,7 +392,7 @@ const Dashboard: React.FC = () => {
                       Drop your pitch deck here
                     </h4>
                     <p className="text-slate-400 mb-6">
-                      Upload your pitch deck to get personalized AI feedback
+                      Upload your pitch deck to get personalized AI feedback and text analysis
                     </p>
                     <input
                       type="file"
@@ -404,7 +412,7 @@ const Dashboard: React.FC = () => {
                       Choose File
                     </motion.label>
                     <p className="text-sm text-slate-500 mt-4">
-                      PDF files only, max 10MB
+                      PDF files only, max 10MB • Text will be automatically extracted and analyzed
                     </p>
                   </>
                 )}
@@ -447,37 +455,62 @@ const Dashboard: React.FC = () => {
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: index * 0.1 }}
-                            className="glass rounded-xl p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all duration-300 border border-slate-700/30"
+                            className="glass rounded-xl p-4 hover:bg-slate-800/30 transition-all duration-300 border border-slate-700/30"
                             whileHover={{ x: 4 }}
                           >
-                            <div className="flex items-center gap-3">
-                              <FileText className="w-6 h-6 text-indigo-400" />
-                              <div>
-                                <h5 className="font-semibold text-white">{deck.file_name}</h5>
-                                <p className="text-sm text-slate-400">
-                                  Uploaded {new Date(deck.created_at).toLocaleDateString()}
-                                </p>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3 flex-1">
+                                <FileText className="w-6 h-6 text-indigo-400" />
+                                <div className="flex-1">
+                                  <h5 className="font-semibold text-white">{deck.file_name}</h5>
+                                  <div className="flex items-center gap-4 text-sm text-slate-400">
+                                    <span>Uploaded {new Date(deck.created_at).toLocaleDateString()}</span>
+                                    {deck.extractedData && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{deck.extractedData.extractionStats?.totalWords || 'N/A'} words</span>
+                                        <span>•</span>
+                                        <span>{deck.extractedData.pageCount || 'N/A'} pages</span>
+                                        {deck.extractedData.extractionStats?.pagesWithOCR > 0 && (
+                                          <>
+                                            <span>•</span>
+                                            <span className="text-orange-400">OCR used</span>
+                                          </>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <motion.button
-                                onClick={() => handleDownloadDeck(deck.storage_path, deck.file_name)}
-                                className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700/50"
-                                title="Download"
-                                whileHover={{ scale: 1.1 }}
-                                whileTap={{ scale: 0.9 }}
-                              >
-                                <Download className="w-5 h-5" />
-                              </motion.button>
-                              <motion.button
-                                onClick={() => handleDeleteDeck(deck.id, deck.file_name)}
-                                className="p-2 text-slate-400 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
-                                title="Delete"
-                                whileHover={{ scale: 1.1 }}
-                                whileTap={{ scale: 0.9 }}
-                              >
-                                <Trash2 className="w-5 h-5" />
-                              </motion.button>
+                              <div className="flex items-center gap-2">
+                                <motion.button
+                                  onClick={() => handleViewDeck(deck.id)}
+                                  className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700/50"
+                                  title="View Content"
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                >
+                                  <Eye className="w-5 h-5" />
+                                </motion.button>
+                                <motion.button
+                                  onClick={() => handleDownloadDeck(deck.storage_path, deck.file_name)}
+                                  className="p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700/50"
+                                  title="Download"
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                >
+                                  <Download className="w-5 h-5" />
+                                </motion.button>
+                                <motion.button
+                                  onClick={() => handleDeleteDeck(deck.id, deck.file_name)}
+                                  className="p-2 text-slate-400 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
+                                  title="Delete"
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </motion.button>
+                              </div>
                             </div>
                           </motion.div>
                         ))}
@@ -500,7 +533,7 @@ const Dashboard: React.FC = () => {
                         No pitch decks yet
                       </h4>
                       <p className="text-slate-500">
-                        Upload your first pitch deck to get started with AI feedback
+                        Upload your first pitch deck to get started with AI feedback and text analysis
                       </p>
                     </motion.div>
                   )}
@@ -685,6 +718,16 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Pitch Deck Viewer Modal */}
+      <AnimatePresence>
+        {selectedDeckId && (
+          <PitchDeckViewer
+            deckId={selectedDeckId}
+            onClose={() => setSelectedDeckId(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

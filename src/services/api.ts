@@ -2,7 +2,12 @@ import { supabase } from '../lib/supabase';
 import { pdfParserService, PDFParseResult } from './pdfParser';
 
 class ApiService {
-  async uploadPitchDeck(file: File): Promise<{ deckId: string; fileName: string; storagePath: string; extractedText?: string }> {
+  async uploadPitchDeck(file: File): Promise<{ 
+    deckId: string; 
+    fileName: string; 
+    storagePath: string; 
+    extractedData: PDFParseResult;
+  }> {
     try {
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -24,16 +29,16 @@ class ApiService {
 
       console.log('🚀 Starting pitch deck upload and processing...');
 
-      // Parse PDF and extract text using OCR
-      let extractedText = '';
+      // Parse PDF and extract comprehensive data
+      let extractedData: PDFParseResult;
       try {
-        console.log('📄 Parsing PDF content...');
-        const parseResult: PDFParseResult = await pdfParserService.parsePDF(file);
-        extractedText = parseResult.text;
-        console.log(`✅ Successfully extracted ${extractedText.length} characters from PDF`);
+        console.log('📄 Parsing PDF content with enhanced extraction...');
+        extractedData = await pdfParserService.parsePDF(file);
+        console.log(`✅ Successfully extracted ${extractedData.extractionStats.totalCharacters} characters from ${extractedData.pageCount} pages`);
+        console.log(`📊 Extraction stats:`, extractedData.extractionStats);
       } catch (parseError) {
-        console.error('⚠️ PDF parsing failed, continuing with upload:', parseError);
-        // Continue with upload even if parsing fails
+        console.error('❌ PDF parsing failed:', parseError);
+        throw new Error(`Failed to parse PDF: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
       }
 
       // Create unique file path
@@ -58,14 +63,25 @@ class ApiService {
 
       console.log('✅ File uploaded to storage successfully');
 
-      // Insert record into pitch_decks table with extracted text
+      // Prepare extracted data for database storage
+      const extractedTextData = {
+        fullText: extractedData.text,
+        pages: extractedData.pages,
+        metadata: extractedData.metadata,
+        extractionStats: extractedData.extractionStats,
+        extractedAt: new Date().toISOString()
+      };
+
+      console.log('💾 Saving extracted data to database...');
+
+      // Insert record into pitch_decks table with comprehensive extracted data
       const { data: deckData, error: deckError } = await supabase
         .from('pitch_decks')
         .insert({
           user_id: user.id,
           file_name: file.name,
           storage_path: storagePath,
-          extracted_text: extractedText || null
+          extracted_text: JSON.stringify(extractedTextData)
         })
         .select()
         .single();
@@ -81,7 +97,7 @@ class ApiService {
         throw new Error(`Database error: ${deckError.message}`);
       }
 
-      console.log('🎉 Pitch deck record created successfully with extracted text');
+      console.log('🎉 Pitch deck record created successfully with extracted data');
 
       // Clean up OCR resources
       await pdfParserService.cleanup();
@@ -90,7 +106,7 @@ class ApiService {
         deckId: deckData.id,
         fileName: file.name,
         storagePath: storagePath,
-        extractedText: extractedText
+        extractedData: extractedData
       };
     } catch (error) {
       console.error('❌ Upload pitch deck error:', error);
@@ -119,9 +135,71 @@ class ApiService {
         throw new Error(error.message);
       }
 
-      return data || [];
+      // Parse extracted text data for each deck
+      const decksWithParsedData = (data || []).map(deck => {
+        let parsedExtractedText = null;
+        
+        if (deck.extracted_text) {
+          try {
+            parsedExtractedText = JSON.parse(deck.extracted_text);
+          } catch (parseError) {
+            console.warn(`Failed to parse extracted text for deck ${deck.id}:`, parseError);
+            // If it's just a string (old format), keep it as is
+            parsedExtractedText = { fullText: deck.extracted_text };
+          }
+        }
+        
+        return {
+          ...deck,
+          extractedData: parsedExtractedText
+        };
+      });
+
+      return decksWithParsedData;
     } catch (error) {
       console.error('Get pitch decks error:', error);
+      throw error;
+    }
+  }
+
+  async getPitchDeckContent(deckId: string): Promise<{
+    deck: any;
+    extractedData: any;
+  }> {
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
+        throw new Error('User not authenticated');
+      }
+
+      const { data: deck, error } = await supabase
+        .from('pitch_decks')
+        .select('*')
+        .eq('id', deckId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (error || !deck) {
+        throw new Error('Pitch deck not found');
+      }
+
+      let extractedData = null;
+      if (deck.extracted_text) {
+        try {
+          extractedData = JSON.parse(deck.extracted_text);
+        } catch (parseError) {
+          console.warn(`Failed to parse extracted text for deck ${deckId}:`, parseError);
+          extractedData = { fullText: deck.extracted_text };
+        }
+      }
+
+      return {
+        deck,
+        extractedData
+      };
+    } catch (error) {
+      console.error('Get pitch deck content error:', error);
       throw error;
     }
   }
